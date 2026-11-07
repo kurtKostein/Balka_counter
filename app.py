@@ -1,5 +1,5 @@
 from nicegui import ui
-from sqlalchemy import (create_engine, String, Integer, ForeignKey,
+from sqlalchemy import (create_engine, String, Integer, Float, ForeignKey,
                         UniqueConstraint)
 from sqlalchemy.orm import (declarative_base, relationship, sessionmaker,
                             Mapped, mapped_column)
@@ -15,6 +15,7 @@ class Part(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True)
     made_qty: Mapped[int] = mapped_column(Integer, default=0)   # изготовлено
+    price: Mapped[float] = mapped_column(Float, default=0.0)    # цена за штуку
 
 
 class Assembly(Base):
@@ -62,6 +63,12 @@ def part_to_make(session, part):
     return max(0, part_demand_remaining(session, part) - part.made_qty)
 
 
+def assembly_unit_cost(session, assembly):
+    """Стоимость одной сборки = сумма (цена детали × кол-во на сборку)."""
+    items = session.query(BOMItem).filter_by(assembly_id=assembly.id).all()
+    return sum(i.qty_per_assembly * i.part.price for i in items)
+
+
 # ---------- UI: вкладка «Детали» ----------
 @ui.refreshable
 def parts_table():
@@ -74,6 +81,8 @@ def parts_table():
             'demand_rem': part_demand_remaining(s, p),
             'made': p.made_qty,
             'to_make': part_to_make(s, p),
+            'price': f'{p.price:,.2f}',
+            'sum_need': f'{p.price * part_demand(s, p):,.2f}',
             'status': 'Готово' if part_to_make(s, p) == 0 else 'В работе',
         } for p in parts]
 
@@ -83,6 +92,8 @@ def parts_table():
         {'name': 'demand_rem', 'label': 'На несобранные', 'field': 'demand_rem'},
         {'name': 'made', 'label': 'Изготовлено', 'field': 'made'},
         {'name': 'to_make', 'label': 'Осталось', 'field': 'to_make'},
+        {'name': 'price', 'label': 'Цена, ₽/шт', 'field': 'price'},
+        {'name': 'sum_need', 'label': 'Сумма по плану, ₽', 'field': 'sum_need'},
         {'name': 'status', 'label': 'Статус', 'field': 'status'},
     ]
     table = ui.table(columns=columns, rows=rows, row_key='id').classes('w-full')
@@ -95,11 +106,14 @@ def edit_part_dialog(part_id=None):
         part = s.get(Part, part_id) if part_id else None
         name_val = part.name if part else ''
         made_val = part.made_qty if part else 0
+        price_val = part.price if part else 0.0
 
     with ui.dialog() as dialog, ui.card():
         ui.label('Редактировать деталь' if part_id else 'Новая деталь')
         name = ui.input('Название', value=name_val)
         made = ui.number('Изготовлено (факт)', value=made_val, min=0, format='%d')
+        price = ui.number('Цена за штуку, ₽', value=price_val, min=0,
+                          step=0.01, format='%.2f')
 
         def save():
             new_name = (name.value or '').strip()
@@ -111,6 +125,9 @@ def edit_part_dialog(part_id=None):
                 ui.notify('«Изготовлено» не может быть отрицательным',
                           type='negative')
                 return
+            if price.value is None or float(price.value) < 0:
+                ui.notify('Цена не может быть отрицательной', type='negative')
+                return
             with Session() as s:
                 dup = s.query(Part).filter(Part.name == new_name,
                                            Part.id != (part_id or 0)).first()
@@ -121,11 +138,13 @@ def edit_part_dialog(part_id=None):
                 p = s.get(Part, part_id) if part_id else Part()
                 p.name = new_name
                 p.made_qty = int(made.value or 0)
+                p.price = round(float(price.value or 0), 2)
                 if not part_id:
                     s.add(p)
                 s.commit()
             dialog.close()
             parts_table.refresh()
+            assemblies_table.refresh()
             bom_section.refresh()
 
         with ui.row():
@@ -177,6 +196,8 @@ def assemblies_table():
         rows = [{
             'id': a.id, 'name': a.name, 'plan': a.planned_qty,
             'done': a.assembled_qty, 'remaining': a.remaining,
+            'unit_cost': f'{assembly_unit_cost(s, a):,.2f}',
+            'plan_cost': f'{assembly_unit_cost(s, a) * a.planned_qty:,.2f}',
         } for a in asm]
 
     columns = [
@@ -184,6 +205,8 @@ def assemblies_table():
         {'name': 'plan', 'label': 'План', 'field': 'plan'},
         {'name': 'done', 'label': 'Собрано', 'field': 'done'},
         {'name': 'remaining', 'label': 'Осталось', 'field': 'remaining'},
+        {'name': 'unit_cost', 'label': 'Цена сборки, ₽', 'field': 'unit_cost'},
+        {'name': 'plan_cost', 'label': 'Сумма по плану, ₽', 'field': 'plan_cost'},
     ]
     table = ui.table(columns=columns, rows=rows, row_key='id').classes('w-full')
     table.on('rowClick', lambda e: edit_assembly_dialog(e.args[1]['id']))
@@ -283,7 +306,7 @@ def bom_section():
     with Session() as s:
         assemblies = s.query(Assembly).order_by(Assembly.name).all()
         parts = s.query(Part).order_by(Part.name).all()
-        part_opts = {p.id: p.name for p in parts}
+        part_opts = {p.id: f'{p.name} — {p.price:,.2f} ₽' for p in parts}
 
         if not assemblies:
             ui.label('Сначала добавьте сборки на вкладке «Сборки».').classes(
@@ -291,14 +314,26 @@ def bom_section():
             return
 
         for a in assemblies:
-            with ui.expansion(f'{a.name}  (план {a.planned_qty})').classes('w-full'):
+            unit_cost = assembly_unit_cost(s, a)
+            plan_cost = unit_cost * a.planned_qty
+            with ui.expansion(
+                    f'{a.name}  (план {a.planned_qty})  —  '
+                    f'{unit_cost:,.2f} ₽/шт').classes('w-full'):
                 items = s.query(BOMItem).filter_by(assembly_id=a.id).all()
                 for it in items:
+                    line_sum = it.qty_per_assembly * it.part.price
                     with ui.row().classes('items-center'):
-                        ui.label(f'{it.part.name}: {it.qty_per_assembly} шт.')
+                        ui.label(f'{it.part.name}: {it.qty_per_assembly} шт. × '
+                                 f'{it.part.price:,.2f} ₽ = {line_sum:,.2f} ₽')
                         ui.button(icon='delete',
                                   on_click=lambda _, i=it.id: del_item(i)
                                   ).props('flat dense color=negative')
+                if items:
+                    ui.separator()
+                    ui.label(f'Себестоимость одной сборки: {unit_cost:,.2f} ₽'
+                             ).classes('font-bold')
+                    ui.label(f'На весь план ({a.planned_qty} шт.): '
+                             f'{plan_cost:,.2f} ₽').classes('font-bold')
                 if part_opts:
                     _add_item_row(a.id, part_opts)
                 else:
@@ -334,7 +369,6 @@ def _add_item_row(asm_id, part_opts):
 
         ui.button('Добавить', on_click=add).props('dense')
 
-
 def del_item(item_id):
     with Session() as s:
         it = s.get(BOMItem, item_id)
@@ -343,6 +377,7 @@ def del_item(item_id):
             s.commit()
     bom_section.refresh()
     parts_table.refresh()
+    assemblies_table.refresh()
 
 
 # ---------- Сборка интерфейса ----------
