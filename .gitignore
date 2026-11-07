@@ -1,0 +1,64 @@
+# ---------- Виртуальные окружения ----------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-log.txt
+
+# ---------- База данных приложения ----------
+# Рабочие данные не версионируются
+assemblies.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Резервные копии базы
+backup*.db
+*.db.bak
+
+# ---------- NiceGUI / веб ----------
+.nicegui/
+*.log
+
+# ---------- Среды разработки ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------- Тесты и линтеры ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------- Операционная система ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Локальные настройки и секреты ----------
+.env
+.env.local
+*.local.py
+
+# ---------- Временные файлы Excel/Office ----------
+~$*.xlsx
+~$*.docx
