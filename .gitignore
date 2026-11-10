@@ -55,6 +55,11 @@ Thumbs.db
 desktop.ini
 
 # ---------- Локальные настройки и секреты ----------
+# Ключ сервисного аккаунта Google — НИКОГДА не коммитить!
+credentials.json
+service_account*.json
+*-credentials.json
+
 .env
 .env.local
 *.local.py

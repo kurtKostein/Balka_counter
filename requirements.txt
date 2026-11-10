@@ -2,7 +2,11 @@
 # Установка:  pip install -r requirements.txt
 
 # Веб-интерфейс (включает FastAPI, uvicorn, Vue/Quasar — ставятся автоматически)
-nicegui>=1.4.0,<3.0
+nicegui>=3.0.4,<4.0
 
 # ORM и работа с SQLite (сам SQLite входит в стандартную библиотеку Python)
 SQLAlchemy>=2.0,<3.0
+
+# Выгрузка данных в Google Таблицы
+gspread>=6.0
+google-auth>=2.28
