@@ -63,6 +63,17 @@ def part_to_make(session, part):
     return max(0, part_demand_remaining(session, part) - part.made_qty)
 
 
+def part_in_assembled(session, part):
+    """Сколько деталей ушло в уже собранные (отправленные) сборки."""
+    rows = session.query(BOMItem).filter_by(part_id=part.id).all()
+    return sum(r.qty_per_assembly * r.assembly.assembled_qty for r in rows)
+
+
+def part_total_made(session, part):
+    """Всего изготовлено: на складе + израсходовано в собранных сборках."""
+    return part.made_qty + part_in_assembled(session, part)
+
+
 def assembly_unit_cost(session, assembly):
     """Стоимость одной сборки = сумма (цена детали × кол-во на сборку)."""
     items = session.query(BOMItem).filter_by(assembly_id=assembly.id).all()
@@ -80,6 +91,8 @@ def parts_table():
             'demand': part_demand(s, p),
             'demand_rem': part_demand_remaining(s, p),
             'made': p.made_qty,
+            'in_asm': part_in_assembled(s, p),
+            'total_made': part_total_made(s, p),
             'to_make': part_to_make(s, p),
             'price': f'{p.price:,.2f}',
             'sum_need': f'{p.price * part_demand(s, p):,.2f}',
@@ -90,7 +103,10 @@ def parts_table():
         {'name': 'name', 'label': 'Деталь', 'field': 'name', 'align': 'left'},
         {'name': 'demand', 'label': 'Нужно всего', 'field': 'demand'},
         {'name': 'demand_rem', 'label': 'На несобранные', 'field': 'demand_rem'},
-        {'name': 'made', 'label': 'Изготовлено', 'field': 'made'},
+        {'name': 'made', 'label': 'На складе', 'field': 'made'},
+        {'name': 'in_asm', 'label': 'В сборках', 'field': 'in_asm'},
+        {'name': 'total_made', 'label': 'Изготовлено всего',
+         'field': 'total_made'},
         {'name': 'to_make', 'label': 'Осталось', 'field': 'to_make'},
         {'name': 'price', 'label': 'Цена, ₽/шт', 'field': 'price'},
         {'name': 'sum_need', 'label': 'Сумма по плану, ₽', 'field': 'sum_need'},
@@ -111,7 +127,7 @@ def edit_part_dialog(part_id=None):
     with ui.dialog() as dialog, ui.card():
         ui.label('Редактировать деталь' if part_id else 'Новая деталь')
         name = ui.input('Название', value=name_val)
-        made = ui.number('Изготовлено (факт)', value=made_val, min=0, format='%d')
+        made = ui.number('На складе (шт.)', value=made_val, min=0, format='%d')
         price = ui.number('Цена за штуку, ₽', value=price_val, min=0,
                           step=0.01, format='%.2f')
 
@@ -122,7 +138,7 @@ def edit_part_dialog(part_id=None):
                 ui.notify('Название не может быть пустым', type='negative')
                 return
             if made.value is None or int(made.value) < 0:
-                ui.notify('«Изготовлено» не может быть отрицательным',
+                ui.notify('«На складе» не может быть отрицательным',
                           type='negative')
                 return
             if price.value is None or float(price.value) < 0:
