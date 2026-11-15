@@ -1,0 +1,51 @@
+from sqlalchemy import (create_engine, String, Integer, ForeignKey,
+                        UniqueConstraint)
+from sqlalchemy.orm import (declarative_base, relationship, sessionmaker,
+                            Mapped, mapped_column)
+
+Base = declarative_base()
+engine = create_engine("sqlite:///assemblies.db")
+Session = sessionmaker(bind=engine)
+
+
+class Part(Base):
+    __tablename__ = "parts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    made_qty: Mapped[int] = mapped_column(Integer, default=0)   # на складе
+
+
+class AssemblyType(Base):
+    __tablename__ = "assembly_types"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+
+
+class Assembly(Base):
+    __tablename__ = "assemblies"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    planned_qty: Mapped[int] = mapped_column(Integer, default=1)
+    assembled_qty: Mapped[int] = mapped_column(Integer, default=0)  # собрано
+    type_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assembly_types.id"), nullable=True)
+    asm_type = relationship("AssemblyType")
+    items = relationship("BOMItem", cascade="all, delete-orphan",
+                         backref="assembly")
+
+    @property
+    def remaining(self):                      # осталось собрать
+        return max(0, self.planned_qty - self.assembled_qty)
+
+
+class BOMItem(Base):
+    __tablename__ = "bom_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assembly_id: Mapped[int] = mapped_column(ForeignKey("assemblies.id"))
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"))
+    qty_per_assembly: Mapped[int] = mapped_column(Integer, default=1)
+    part = relationship("Part")
+    __table_args__ = (UniqueConstraint("assembly_id", "part_id"),)
+
+
+Base.metadata.create_all(engine)
