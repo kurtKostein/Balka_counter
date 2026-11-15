@@ -20,12 +20,21 @@ class Part(Base):
     made_qty: Mapped[int] = mapped_column(Integer, default=0)   # на складе
 
 
+class AssemblyType(Base):
+    __tablename__ = "assembly_types"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+
+
 class Assembly(Base):
     __tablename__ = "assemblies"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True)
     planned_qty: Mapped[int] = mapped_column(Integer, default=1)
     assembled_qty: Mapped[int] = mapped_column(Integer, default=0)  # собрано
+    type_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assembly_types.id"), nullable=True)
+    asm_type = relationship("AssemblyType")
     items = relationship("BOMItem", cascade="all, delete-orphan",
                          backref="assembly")
 
@@ -74,6 +83,25 @@ def part_in_assembled(session, part):
 def part_total_made(session, part):
     """Всего изготовлено: на складе + израсходовано в собранных сборках."""
     return part.made_qty + part_in_assembled(session, part)
+
+
+def resolve_type_id(session, raw):
+    """Принимает id существующего типа или введённое название.
+    Новое название создаёт тип в справочнике. None/пусто — сборка без типа."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    name = str(raw).strip()
+    if not name:
+        return None
+    t = session.query(AssemblyType).filter_by(name=name).first()
+    if t:
+        return t.id
+    t = AssemblyType(name=name)
+    session.add(t)
+    session.flush()
+    return t.id
 
 
 # ---------- UI: вкладка «Детали» ----------
@@ -195,12 +223,15 @@ def assemblies_table():
     with Session() as s:
         asm = s.query(Assembly).order_by(Assembly.name).all()
         rows = [{
-            'id': a.id, 'name': a.name, 'plan': a.planned_qty,
+            'id': a.id, 'name': a.name,
+            'type': a.asm_type.name if a.asm_type else '—',
+            'plan': a.planned_qty,
             'done': a.assembled_qty, 'remaining': a.remaining,
         } for a in asm]
 
     columns = [
         {'name': 'name', 'label': 'Сборка', 'field': 'name', 'align': 'left'},
+        {'name': 'type', 'label': 'Тип', 'field': 'type', 'align': 'left'},
         {'name': 'plan', 'label': 'План', 'field': 'plan'},
         {'name': 'done', 'label': 'Собрано', 'field': 'done'},
         {'name': 'remaining', 'label': 'Осталось', 'field': 'remaining'},
@@ -216,12 +247,18 @@ def edit_assembly_dialog(asm_id=None):
         name_val = a.name if a else ''
         plan_val = a.planned_qty if a else 1
         done_val = a.assembled_qty if a else 0
+        type_val = a.type_id if a else None
+        type_opts = {t.id: t.name
+                     for t in s.query(AssemblyType).order_by(
+                         AssemblyType.name)}
 
     with ui.dialog() as dialog, ui.card():
         ui.label('Редактировать сборку' if asm_id else 'Новая сборка')
         name = ui.input('Название', value=name_val)
         plan = ui.number('План (шт.)', value=plan_val, min=0, format='%d')
         done = ui.number('Собрано (шт.)', value=done_val, min=0, format='%d')
+        sel_type = ui.select(type_opts, label='Тип (необязательно)',
+                             value=type_val).classes('w-full')
 
         def save():
             new_name = (name.value or '').strip()
@@ -250,6 +287,7 @@ def edit_assembly_dialog(asm_id=None):
                 a.name = new_name
                 a.planned_qty = p_val
                 a.assembled_qty = d_val
+                a.type_id = resolve_type_id(s, sel_type.value)
                 if not asm_id:
                     s.add(a)
                 s.commit()
@@ -297,6 +335,108 @@ def confirm_delete_assembly(asm_id, parent_dialog=None):
     d.open()
 
 
+# ---------- UI: диалог управления типами ----------
+def manage_types_dialog():
+    with ui.dialog() as dialog, ui.card():
+        ui.label('Типы сборок').classes('text-lg font-bold')
+
+        @ui.refreshable
+        def types_list():
+            with Session() as s:
+                types = s.query(AssemblyType).order_by(AssemblyType.name).all()
+            if not types:
+                ui.label('Типов пока нет — добавьте ниже.').classes(
+                    'text-gray-500')
+            for t in types:
+                with ui.row().classes('items-center w-full'):
+                    inp = ui.input(value=t.name).classes('grow')
+
+                    def rename(_, tid=t.id, i=inp):
+                        new_name = (i.value or '').strip()
+                        if not new_name:
+                            ui.notify('Название не может быть пустым',
+                                      type='negative')
+                            return
+                        with Session() as s:
+                            dup = s.query(AssemblyType).filter(
+                                AssemblyType.name == new_name,
+                                AssemblyType.id != tid).first()
+                            if dup:
+                                ui.notify(f'Тип «{new_name}» уже существует',
+                                          type='negative')
+                                return
+                            t = s.get(AssemblyType, tid)
+                            if t:
+                                t.name = new_name
+                                s.commit()
+                        ui.notify('Тип переименован', type='positive')
+                        types_list.refresh()
+                        assemblies_table.refresh()
+                        bom_section.refresh()
+
+                    inp.on('change', rename)
+                    ui.button(icon='delete',
+                              on_click=lambda _, tid=t.id: ask_delete(tid)
+                              ).props('flat dense color=negative')
+
+        def ask_delete(tid):
+            with Session() as s:
+                t = s.get(AssemblyType, tid)
+                tname = t.name if t else ''
+                used = s.query(Assembly).filter_by(type_id=tid).count()
+
+            with ui.dialog() as d, ui.card():
+                ui.label(f'Удалить тип «{tname}»?')
+                if used:
+                    ui.label(f'Тип назначен {used} сборк(ам) — '
+                             'у сборок он просто пропадёт.').classes(
+                        'text-negative')
+
+                def do_delete():
+                    with Session() as s:
+                        s.query(Assembly).filter_by(type_id=tid).update(
+                            {'type_id': None})
+                        t = s.get(AssemblyType, tid)
+                        if t:
+                            s.delete(t)
+                        s.commit()
+                    d.close()
+                    types_list.refresh()
+                    assemblies_table.refresh()
+                    bom_section.refresh()
+                    ui.notify(f'Тип «{tname}» удалён', type='positive')
+
+                with ui.row():
+                    ui.button('Да, удалить', on_click=do_delete).props(
+                        'color=negative')
+                    ui.button('Отмена', on_click=d.close).props('flat')
+            d.open()
+
+        types_list()
+
+        new_type = ui.input('Новый тип').classes('w-full')
+
+        def add_type():
+            name = (new_type.value or '').strip()
+            if not name:
+                ui.notify('Введите название типа', type='warning')
+                return
+            with Session() as s:
+                if s.query(AssemblyType).filter_by(name=name).first():
+                    ui.notify(f'Тип «{name}» уже существует', type='negative')
+                    return
+                s.add(AssemblyType(name=name))
+                s.commit()
+            new_type.value = ''
+            types_list.refresh()
+            ui.notify(f'Тип «{name}» добавлен', type='positive')
+
+        with ui.row():
+            ui.button('Добавить', on_click=add_type).props('dense')
+            ui.button('Готово', on_click=dialog.close).props('flat')
+    dialog.open()
+
+
 # ---------- UI: вкладка «Состав сборок» ----------
 @ui.refreshable
 def bom_section():
@@ -308,7 +448,9 @@ def bom_section():
                            key=lambda it: it.part.name)
             comp = ', '.join(f'{it.part.name} {it.qty_per_assembly}шт.'
                              for it in items) or '—'
-            rows.append({'asm_id': a.id, 'assembly': a.name,
+            asm_label = (f'{a.name} · {a.asm_type.name}'
+                         if a.asm_type else a.name)
+            rows.append({'asm_id': a.id, 'assembly': asm_label,
                          'parts': comp})
 
     if not rows:
@@ -453,15 +595,19 @@ def build_export_data():
             ])
 
         asm = s.query(Assembly).order_by(Assembly.name).all()
-        asm_rows = [['Сборка', 'План', 'Собрано', 'Осталось']]
+        asm_rows = [['Сборка', 'Тип', 'План', 'Собрано', 'Осталось']]
         for a in asm:
-            asm_rows.append([a.name, a.planned_qty, a.assembled_qty,
-                             a.remaining])
+            asm_rows.append([a.name,
+                             a.asm_type.name if a.asm_type else '',
+                             a.planned_qty, a.assembled_qty, a.remaining])
 
-        bom_rows = [['Сборка', 'Деталь', 'Кол-во на сборку', 'Всего по плану']]
+        bom_rows = [['Сборка', 'Тип', 'Деталь', 'Кол-во на сборку',
+                     'Всего по плану']]
         for a in asm:
             for it in s.query(BOMItem).filter_by(assembly_id=a.id).all():
-                bom_rows.append([a.name, it.part.name, it.qty_per_assembly,
+                bom_rows.append([a.name,
+                                 a.asm_type.name if a.asm_type else '',
+                                 it.part.name, it.qty_per_assembly,
                                  it.qty_per_assembly * a.planned_qty])
 
     return {'Детали': parts_rows, 'Сборки': asm_rows,
@@ -547,7 +693,10 @@ def main_page():
             ui.button('+ Деталь', on_click=lambda: edit_part_dialog())
             parts_table()
         with ui.tab_panel(t_asm):
-            ui.button('+ Сборка', on_click=lambda: edit_assembly_dialog())
+            with ui.row():
+                ui.button('+ Сборка', on_click=lambda: edit_assembly_dialog())
+                ui.button('Типы', icon='label',
+                          on_click=manage_types_dialog)
             assemblies_table()
         with ui.tab_panel(t_bom):
             bom_section()
