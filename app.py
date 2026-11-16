@@ -1,10 +1,10 @@
 from nicegui import ui
 
 from export import do_export
-from ui.assemblies import (assemblies_table, edit_assembly_dialog,
-                           manage_types_dialog)
-from ui.bom import bom_section
-from ui.parts import edit_part_dialog, parts_table
+from pages.assemblies import (assemblies_table, edit_assembly_dialog,
+                              manage_types_dialog)
+from pages.bom import bom_section
+from pages.parts import edit_part_dialog, parts_table
 
 
 @ui.page('/')

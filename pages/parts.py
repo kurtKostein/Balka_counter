@@ -3,7 +3,7 @@ from nicegui import ui
 from calculations import (part_demand, part_demand_remaining, part_to_make,
                           part_in_assembled, part_total_made)
 from database import BOMItem, Part, Session
-from ui.registry import refresh, register
+from pages.registry import refresh, register
 
 
 @ui.refreshable

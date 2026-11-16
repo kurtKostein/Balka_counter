@@ -1,7 +1,7 @@
 from nicegui import ui
 
 from database import Assembly, BOMItem, Part, Session
-from ui.registry import refresh, register
+from pages.registry import refresh, register
 
 
 @ui.refreshable

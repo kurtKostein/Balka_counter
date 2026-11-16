@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 # Реестр refresh-функций вкладок.
-# Позволяет модулям ui/* обновлять таблицы других вкладок
+# Позволяет модулям pages/* обновлять таблицы других вкладок
 # без циклических импортов.
 refreshers: dict[str, Callable[[], None]] = {}
 

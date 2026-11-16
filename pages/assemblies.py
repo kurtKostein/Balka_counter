@@ -2,7 +2,7 @@ from nicegui import ui
 
 from calculations import resolve_type_id
 from database import Assembly, AssemblyType, Session
-from ui.registry import refresh, register
+from pages.registry import refresh, register
 
 
 @ui.refreshable
