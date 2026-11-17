@@ -8,9 +8,18 @@ from pages.parts import edit_part_dialog, parts_table
 
 
 @ui.page('/')
+
 def main_page():
+
+    dark = ui.dark_mode()
+
     with ui.row().classes('items-center w-full justify-between'):
         ui.label('Учёт сборок и деталей').classes('text-2xl font-bold')
+        ui.toggle(
+            {False: '☀️ Светлая', True: '🌙 Тёмная', None: 'Авто'},
+                value=dark.value,
+                on_change=lambda e: dark.set_value(e.value)
+        )
         ui.button('Выгрузить в Google Таблицы', icon='cloud_upload',
                   on_click=do_export).props('color=green')
     with ui.tabs() as tabs:
