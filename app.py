@@ -1,6 +1,7 @@
 from nicegui import ui
 
 from export import do_export
+from import_data import do_import
 from pages.assemblies import (assemblies_table, edit_assembly_dialog,
                               manage_types_dialog)
 from pages.bom import bom_section
@@ -20,8 +21,11 @@ def main_page():
                 value=dark.value,
                 on_change=lambda e: dark.set_value(e.value)
         )
-        ui.button('Выгрузить в Google Таблицы', icon='cloud_upload',
-                  on_click=do_export).props('color=green')
+        with ui.row():
+            ui.button('Импорт из Google Таблиц', icon='cloud_download',
+                      on_click=do_import)
+            ui.button('Выгрузить в Google Таблицы', icon='cloud_upload',
+                      on_click=do_export).props('color=green')
     with ui.tabs() as tabs:
         t_parts = ui.tab('Детали')
         t_asm = ui.tab('Сборки')
