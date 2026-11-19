@@ -1,0 +1,18 @@
+# Зависимости для разработки и тестирования.
+# Включает всё из requirements.txt + инструменты разработки.
+# Установка:  pip install -r requirements-dev.txt
+
+# Зависимости приложения «Учёт сборок и деталей»
+
+# Веб-интерфейс (включает FastAPI, uvicorn, Vue/Quasar — ставятся автоматически)
+nicegui>=3.0.4,<4.0
+
+# ORM и работа с SQLite (сам SQLite входит в стандартную библиотеку Python)
+SQLAlchemy>=2.0,<3.0
+
+# Выгрузка данных в Google Таблицы
+gspread>=6.0
+google-auth>=2.28
+
+# Тесты:  pytest -q
+pytest>=8.0

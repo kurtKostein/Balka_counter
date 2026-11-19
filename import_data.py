@@ -219,6 +219,7 @@ def _import_bom(s, rows, report, sheet_asm, asm_by_name):
     i_qty = _col(header, 'Кол-во на сборку', SHEET_BOM)
 
     sheet_bom = {}
+    broken = set()      # сборки с ошибочными строками — состав не синхронизируем
     for num, row in enumerate(rows[1:], start=2):
         asm_name = str(row[i_asm]).strip() if i_asm < len(row) else ''
         part_name = str(row[i_part]).strip() if i_part < len(row) else ''
@@ -233,6 +234,7 @@ def _import_bom(s, rows, report, sheet_asm, asm_by_name):
                 f'Состав «{asm_name}»: количество для «{part_name}» = '
                 f'«{row[i_qty] if i_qty < len(row) else ""}» — нужно целое '
                 'число не меньше 1, строка пропущена.')
+            broken.add(asm_name)
             continue
         parts_qty = sheet_bom.setdefault(asm_name, {})
         if part_name in parts_qty:
@@ -257,8 +259,14 @@ def _import_bom(s, rows, report, sheet_asm, asm_by_name):
                 report.warnings.append(
                     f'В составе «{name}» деталь «{part_name}» отсутствует '
                     f'в листе «{SHEET_PARTS}» — строка пропущена.')
+                broken.add(name)
                 continue
             wanted[p.id] = qty
+        if name in broken:
+            report.warnings.append(
+                f'Состав «{name}» содержит ошибки — существующий состав '
+                'оставлен без изменений.')
+            continue
         existing = {it.part_id: it
                     for it in s.query(BOMItem).filter_by(
                         assembly_id=a.id).all()}
