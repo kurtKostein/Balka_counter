@@ -1,7 +1,7 @@
 from nicegui import ui
 
-from calculations import resolve_type_id
-from database import Assembly, AssemblyType, Session
+from calculations import apply_stock_recalc, resolve_type_id
+from database import Assembly, AssemblyType, BOMItem, Session
 from pages.registry import refresh, register
 
 
@@ -73,15 +73,41 @@ def edit_assembly_dialog(asm_id=None):
                     ui.notify(f'Сборка «{new_name}» уже существует',
                               type='negative')
                     return
+                has_items = bool(
+                    asm_id and s.query(BOMItem).filter_by(
+                        assembly_id=asm_id).count())
+            if has_items and d_val != done_val:
+                ask_stock_recalc(name_val, done_val, d_val,
+                                 lambda recalc: commit(
+                                     recalc, new_name, p_val, d_val))
+            else:
+                commit(recalc=False, new_name=new_name, p_val=p_val,
+                       d_val=d_val)
+
+        def commit(recalc, new_name, p_val, d_val):
+            with Session() as s:
                 a = s.get(Assembly, asm_id) if asm_id else Assembly()
+                old_assembled = a.assembled_qty if asm_id else 0
                 a.name = new_name
                 a.planned_qty = p_val
                 a.assembled_qty = d_val
                 a.type_id = resolve_type_id(s, sel_type.value)
                 if not asm_id:
                     s.add(a)
+                s.flush()
+                shortages = (apply_stock_recalc(s, a, old_assembled, d_val)
+                             if recalc else {})
                 s.commit()
             dialog.close()
+            if recalc:
+                if shortages:
+                    detail = '; '.join(f'«{n}» не хватило {q} шт.'
+                                       for n, q in shortages.items())
+                    ui.notify('Остатки пересчитаны: ' + detail +
+                              ' — их остаток обнулён.',
+                              type='warning', multi_line=True)
+                else:
+                    ui.notify('Остатки деталей пересчитаны', type='positive')
             assemblies_table.refresh()
             refresh('parts', 'bom')
 
@@ -92,6 +118,30 @@ def edit_assembly_dialog(asm_id=None):
                     asm_id, dialog)).props('flat color=negative')
             ui.button('Отмена', on_click=dialog.close).props('flat')
     dialog.open()
+
+
+def ask_stock_recalc(asm_name, old_done, new_done, commit):
+    """Спрашивает, пересчитывать ли остатки деталей на складе, когда
+    при сохранении сборки изменилось количество готовых (issue #1)."""
+    with ui.dialog() as d, ui.card():
+        ui.label(f'«Собрано» по сборке «{asm_name}» изменилось: '
+                 f'{old_done} → {new_done} шт.')
+        ui.label('Пересчитать остатки деталей на складе?')
+
+        def do_recalc():
+            d.close()
+            commit(recalc=True)
+
+        def keep_stock():
+            d.close()
+            commit(recalc=False)
+
+        with ui.row():
+            ui.button('Да, пересчитать', on_click=do_recalc)
+            ui.button('Нет, сохранить без пересчёта',
+                      on_click=keep_stock).props('flat')
+            ui.button('Отмена', on_click=d.close).props('flat')
+    d.open()
 
 
 def confirm_delete_assembly(asm_id, parent_dialog=None):

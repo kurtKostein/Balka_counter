@@ -66,6 +66,32 @@ def parts_stats(session, parts):
 
 
 
+def apply_stock_recalc(session, assembly, old_assembled, new_assembled):
+    """Пересчитывает складские остатки деталей сборки после изменения
+    количества готовых сборок с old_assembled на new_assembled.
+
+    Прирост «Собрано» списывает детали со склада
+    (qty_per_assembly × прирост), уменьшение возвращает их на склад.
+    Остаток не уходит в минус: нехватка обрезается до нуля и попадает
+    в возвращаемый отчёт {название детали: нехватка, шт.}. Пустой
+    отчёт — пересчёт прошёл точно либо изменений не было."""
+    delta = new_assembled - old_assembled
+    if delta == 0:
+        return {}
+    items = (session.query(BOMItem)
+             .filter_by(assembly_id=assembly.id)
+             .options(joinedload(BOMItem.part))
+             .all())
+    shortages = {}
+    for it in items:
+        new_qty = it.part.made_qty - delta * it.qty_per_assembly
+        if new_qty < 0:
+            shortages[it.part.name] = -new_qty
+            new_qty = 0
+        it.part.made_qty = new_qty
+    return shortages
+
+
 def resolve_type_id(session, raw):
     """Принимает id существующего типа или введённое название.
     Новое название создаёт тип в справочнике. None/пусто — сборка без типа."""
