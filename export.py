@@ -2,9 +2,9 @@ import os
 from datetime import datetime
 
 from nicegui import ui, run
+from sqlalchemy.orm import joinedload
 
-from calculations import (part_demand, part_demand_remaining, part_to_make,
-                          part_in_assembled, part_total_made)
+from calculations import parts_stats
 from database import Assembly, BOMItem, Part, Session
 
 # Требуется: pip install gspread google-auth
@@ -18,14 +18,15 @@ def build_export_data():
     """Готовит три набора строк: Детали, Сборки, Состав сборок."""
     with Session() as s:
         parts = s.query(Part).order_by(Part.name).all()
+        stats = parts_stats(s, parts)
         parts_rows = [['Деталь', 'Нужно всего', 'На несобранные', 'На складе',
                        'В сборках', 'Изготовлено всего', 'Осталось', 'Статус']]
         for p in parts:
+            st = stats[p.id]
             parts_rows.append([
-                p.name, part_demand(s, p), part_demand_remaining(s, p),
-                p.made_qty, part_in_assembled(s, p), part_total_made(s, p),
-                part_to_make(s, p),
-                'Готово' if part_to_make(s, p) == 0 else 'В работе',
+                p.name, st['demand'], st['demand_rem'],
+                p.made_qty, st['in_asm'], st['total_made'],
+                st['to_make'], st['status'],
             ])
 
         asm = s.query(Assembly).order_by(Assembly.name).all()
@@ -37,12 +38,17 @@ def build_export_data():
 
         bom_rows = [['Сборка', 'Тип', 'Деталь', 'Кол-во на сборку',
                      'Всего по плану']]
-        for a in asm:
-            for it in s.query(BOMItem).filter_by(assembly_id=a.id).all():
-                bom_rows.append([a.name,
-                                 a.asm_type.name if a.asm_type else '',
-                                 it.part.name, it.qty_per_assembly,
-                                 it.qty_per_assembly * a.planned_qty])
+        items = (s.query(BOMItem)
+                 .options(joinedload(BOMItem.assembly),
+                          joinedload(BOMItem.part))
+                 .all())
+        items.sort(key=lambda it: (it.assembly.name, it.id))
+        for it in items:
+            a = it.assembly
+            bom_rows.append([a.name,
+                             a.asm_type.name if a.asm_type else '',
+                             it.part.name, it.qty_per_assembly,
+                             it.qty_per_assembly * a.planned_qty])
 
     return {'Детали': parts_rows, 'Сборки': asm_rows,
             'Состав сборок': bom_rows}

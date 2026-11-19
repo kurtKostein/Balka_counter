@@ -1,7 +1,6 @@
 from nicegui import ui
 
-from calculations import (part_demand, part_demand_remaining, part_to_make,
-                          part_in_assembled, part_total_made)
+from calculations import parts_stats
 from database import BOMItem, Part, Session
 from pages.registry import refresh, register
 
@@ -10,16 +9,17 @@ from pages.registry import refresh, register
 def parts_table():
     with Session() as s:
         parts = s.query(Part).order_by(Part.name).all()
+        stats = parts_stats(s, parts)
         rows = [{
             'id': p.id,
             'name': p.name,
-            'demand': part_demand(s, p),
-            'demand_rem': part_demand_remaining(s, p),
+            'demand': stats[p.id]['demand'],
+            'demand_rem': stats[p.id]['demand_rem'],
             'made': p.made_qty,
-            'in_asm': part_in_assembled(s, p),
-            'total_made': part_total_made(s, p),
-            'to_make': part_to_make(s, p),
-            'status': 'Готово' if part_to_make(s, p) == 0 else 'В работе',
+            'in_asm': stats[p.id]['in_asm'],
+            'total_made': stats[p.id]['total_made'],
+            'to_make': stats[p.id]['to_make'],
+            'status': stats[p.id]['status'],
         } for p in parts]
 
     columns = [

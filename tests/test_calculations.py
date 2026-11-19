@@ -8,7 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from calculations import (part_demand, part_demand_remaining,
-                          part_in_assembled, part_to_make, part_total_made)
+                          part_in_assembled, part_to_make, part_total_made,
+                          parts_stats)
 from database import Assembly, BOMItem, Base, Part
 
 
@@ -156,3 +157,32 @@ def test_same_part_summed_across_assemblies(session_factory):
     assert part_total_made(session_factory(), part) == 9
     # Осталось изготовить: 22 - 4 = 18.
     assert part_to_make(session_factory(), part) == 18
+
+
+def test_parts_stats_matches_individual_functions(session_factory):
+    # parts_stats (одним запросом) должен давать те же числа и статус,
+    # что и пофункциональные расчёты — включая деталь без состава.
+    seed(
+        session_factory,
+        parts=[('Вал', 4), ('Шестерня', 10), ('Лишняя', 0)],
+        assemblies=[('Привод', 3, 1), ('Редуктор', 2, 2), ('Насос', 4, 0)],
+        bom=[('Привод', 'Вал', 1), ('Редуктор', 'Вал', 2),
+             ('Насос', 'Вал', 5), ('Привод', 'Шестерня', 2)],
+    )
+    with session_factory() as s:
+        parts = s.query(Part).order_by(Part.name).all()
+        stats = parts_stats(s, parts)
+        for p in parts:
+            st = stats[p.id]
+            to_make = part_to_make(s, p)
+            assert st['demand'] == part_demand(s, p)
+            assert st['demand_rem'] == part_demand_remaining(s, p)
+            assert st['in_asm'] == part_in_assembled(s, p)
+            assert st['total_made'] == part_total_made(s, p)
+            assert st['to_make'] == to_make
+            assert st['status'] == ('Готово' if to_make == 0
+                                    else 'В работе')
+
+
+def test_parts_stats_empty_input(session_factory):
+    assert parts_stats(session_factory(), []) == {}

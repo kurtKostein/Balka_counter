@@ -1,3 +1,5 @@
+from sqlalchemy.orm import joinedload
+
 from database import AssemblyType, BOMItem
 
 
@@ -27,6 +29,41 @@ def part_in_assembled(session, part):
 def part_total_made(session, part):
     """Всего изготовлено: на складе + израсходовано в собранных сборках."""
     return part.made_qty + part_in_assembled(session, part)
+
+
+def parts_stats(session, parts):
+    """Все показатели деталей одним запросом: составы со сборками
+    загружаются сразу для всего списка. Возвращает {part_id: {...}}."""
+    if not parts:
+        return {}
+    items = (session.query(BOMItem)
+             .filter(BOMItem.part_id.in_(p.id for p in parts))
+             .options(joinedload(BOMItem.assembly))
+             .all())
+    by_part = {}
+    for it in items:
+        by_part.setdefault(it.part_id, []).append(it)
+    stats = {}
+    for p in parts:
+        rows = by_part.get(p.id, [])
+        demand = sum(r.qty_per_assembly * r.assembly.planned_qty
+                     for r in rows)
+        demand_rem = sum(r.qty_per_assembly * r.assembly.remaining
+                         for r in rows)
+        in_asm = sum(r.qty_per_assembly * r.assembly.assembled_qty
+                     for r in rows)
+        total_made = p.made_qty + in_asm
+        to_make = max(0, demand_rem - p.made_qty)
+        stats[p.id] = {
+            'demand': demand,
+            'demand_rem': demand_rem,
+            'in_asm': in_asm,
+            'total_made': total_made,
+            'to_make': to_make,
+            'status': 'Готово' if to_make == 0 else 'В работе',
+        }
+    return stats
+
 
 
 def resolve_type_id(session, raw):
