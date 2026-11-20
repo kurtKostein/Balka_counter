@@ -87,7 +87,6 @@ def edit_assembly_bom_dialog(asm_id):
                             ui.notify('Количество сохранено',
                                       type='positive')
                         items_list.refresh()
-                        bom_section.refresh()
                         refresh('parts')
 
                     qty.on('change', save_qty)
@@ -102,7 +101,6 @@ def edit_assembly_bom_dialog(asm_id):
                     s.delete(it)
                     s.commit()
             items_list.refresh()
-            bom_section.refresh()
             refresh('parts')
 
         items_list()
@@ -129,7 +127,6 @@ def edit_assembly_bom_dialog(asm_id):
                     ui.notify('Деталь добавлена в состав', type='positive')
                 s.commit()
             items_list.refresh()
-            bom_section.refresh()
             refresh('parts')
 
         with ui.row().classes('items-center w-full'):
@@ -138,4 +135,10 @@ def edit_assembly_bom_dialog(asm_id):
                                 format='%d').classes('w-24')
             ui.button('Добавить', on_click=add).props('dense')
         ui.button('Готово', on_click=dialog.close).props('flat')
+
+    def refresh_on_close(e):
+        if not e.value:
+            bom_section.refresh()
+
+    dialog.on_value_change(refresh_on_close)
     dialog.open()
